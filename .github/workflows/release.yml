@@ -11,6 +11,11 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# Necessario para criar a tag e publicar a release. Sem isto o workflow depende da
+# configuracao padrao do repositorio, que pode estar em somente leitura.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest # Windows required for CodeWalker
@@ -28,19 +33,31 @@ jobs:
         shell: pwsh
         run: |
           cd "${{ github.workspace }}/CodeWalker.API"
-          # Get the latest semver tag (e.g. v1.2.3), default to v0.0.0 if none
+          # Get the latest semver tag (e.g. v1.2.3)
           $latest = git tag --list "v*" --sort=-version:refname | Select-Object -First 1
-          if (-not $latest) { $latest = "v0.0.0" }
-          Write-Host "Latest tag: $latest"
 
-          # Parse major.minor.patch
-          $parts = $latest.TrimStart('v').Split('.')
-          $major = [int]$parts[0]
-          $minor = [int]$parts[1]
-          $patch = [int]$parts[2]
+          if ($latest) {
+            Write-Host "Latest tag: $latest"
 
-          # Check commit messages since last tag for version bump hints
-          $commits = git log "$latest..HEAD" --pretty=format:"%s" 2>$null
+            # Parse major.minor.patch
+            $parts = $latest.TrimStart('v').Split('.')
+            $major = [int]$parts[0]
+            $minor = [int]$parts[1]
+            $patch = [int]$parts[2]
+
+            # Only the commits added since that tag decide the bump
+            $commits = git log "$latest..HEAD" --pretty=format:"%s"
+          } else {
+            # No tags yet (fresh clone of the repo). Using a placeholder like v0.0.0 here
+            # would break the next command: it is not a real ref, so `git log v0.0.0..HEAD`
+            # fails and the whole step dies before producing a version.
+            Write-Host "No tags found - starting from 0.0.0 and reading the full history"
+
+            $major = 0
+            $minor = 0
+            $patch = 0
+            $commits = git log --pretty=format:"%s"
+          }
           if ($commits -match "(?i)BREAKING CHANGE|^feat!") {
             $major++; $minor = 0; $patch = 0
             Write-Host "Detected BREAKING CHANGE → major bump"
@@ -66,7 +83,9 @@ jobs:
           git tag -a "${{ steps.version.outputs.TAG }}" -m "Release ${{ steps.version.outputs.TAG }}"
           git push origin "${{ steps.version.outputs.TAG }}"
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # RELEASE_TOKEN e um secret do repositorio original. Num fork ele nao existe, e o
+          # GITHUB_TOKEN padrao ja basta com a permissao contents:write declarada acima.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       # ── Build pipeline (unchanged) ──
       - name: Clone Full CodeWalker Repo (for CodeWalker.Core)
@@ -130,4 +149,6 @@ jobs:
           generate_release_notes: true
           files: "${{ github.workspace }}/CodeWalker.API.zip"
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # RELEASE_TOKEN e um secret do repositorio original. Num fork ele nao existe, e o
+          # GITHUB_TOKEN padrao ja basta com a permissao contents:write declarada acima.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
