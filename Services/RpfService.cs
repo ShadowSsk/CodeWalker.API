@@ -20,16 +20,39 @@ public class RpfService
         InitializeRpfManager();
     }
 
+    private bool _useMods;
+    private bool _preferModsOverBase;
+
     private void InitializeRpfManager()
     {
         var cfg = _configService.Get();
         string gtaPath = cfg.GTAPath;
         bool isGen9 = cfg.Gen9;
 
+        _useMods = cfg.UseModsFolder ?? cfg.EnableMods;
+        _preferModsOverBase = cfg.PreferModsOverBase;
+
         _rpfManager = new RpfManager();
+
+        // Without this the manager still indexes the mods folder into ModEntryDict, but
+        // GetEntry/FindRpfFile never look at it - so downloads always resolve to the base game.
+        _rpfManager.EnableMods = _useMods;
+
+        if (!cfg.ScanDlcPacks)
+        {
+            _rpfManager.ExcludePaths = new[] { "update\\x64\\dlcpacks", "mods\\update\\x64\\dlcpacks" };
+        }
+
         _rpfManager.Init(gtaPath, isGen9, Console.WriteLine, Console.Error.WriteLine);
 
-        _logger.LogInformation("[RpfService] Initialized with Gen9 = {Gen9}, GTA Path = {GtaPath}", isGen9, gtaPath);
+        _logger.LogInformation(
+            "[RpfService] Initialized with Gen9 = {Gen9}, Mods = {Mods}, PreferMods = {PreferMods}, DlcPacks = {Dlc}, GTA Path = {GtaPath}",
+            isGen9, _useMods, _preferModsOverBase, cfg.ScanDlcPacks, gtaPath);
+
+        if (_useMods)
+        {
+            _logger.LogInformation("[RpfService] Mod entries indexed: {Count}", _rpfManager.ModEntryDict.Count);
+        }
     }
 
     public void Reload()
@@ -46,8 +69,40 @@ public class RpfService
 
     public List<string> SearchFile(string filename)
     {
+        var baseResults = Match(_rpfManager.EntryDict.Values, filename);
+
+        if (!_useMods)
+        {
+            return baseResults;
+        }
+
+        // ModEntryDict indexes every entry twice (with and without the "mods\" prefix),
+        // so only keep the prefixed form to avoid duplicates in the response.
+        var modResults = Match(_rpfManager.ModEntryDict.Values, filename)
+            .Where(path => path.StartsWith("mods\\", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var results = new List<string>(modResults.Count + baseResults.Count);
+
+        if (_preferModsOverBase)
+        {
+            results.AddRange(modResults);
+            results.AddRange(baseResults);
+        }
+        else
+        {
+            results.AddRange(baseResults);
+            results.AddRange(modResults);
+        }
+
+        return results;
+    }
+
+    private static List<string> Match(IEnumerable<RpfEntry> entries, string filename)
+    {
         var results = new List<string>();
-        foreach (var entry in _rpfManager.EntryDict.Values)
+        foreach (var entry in entries)
         {
             if (entry.Name.Contains(filename, StringComparison.OrdinalIgnoreCase))
             {
