@@ -43,25 +43,25 @@ Três chaves novas:
   a forma prefixada é mantida, para não duplicar resultados.
 - `ScanDlcPacks=false` alimenta o `ExcludePaths` do manager.
 
-### `CodeWalker.API.csproj`
-
-O `ProjectReference` aponta para `..\CodeWalker\CodeWalker.Core\CodeWalker.Core.csproj`.
-O upstream espera `..\CodeWalker.Core\`, que não existe em nenhum repositório — o fonte da
-Core vem de [dexyfex/CodeWalker](https://github.com/dexyfex/CodeWalker).
-
 ## Como compilar
 
-Requer o **.NET 9 SDK**. O fonte da CodeWalker precisa estar ao lado deste repositório:
+Requer o **.NET 9 SDK**. O `.csproj` referencia `..\CodeWalker.Core\`, então a pasta
+`CodeWalker.Core` precisa estar **ao lado** deste repositório — não dentro do clone da
+CodeWalker:
 
 ```
 C:\Projetos\
-  ├── CodeWalker.API\     (este repositório)
-  └── CodeWalker\         (clone de dexyfex/CodeWalker, sem modificações)
+  ├── CodeWalker.API\      (este repositório)
+  └── CodeWalker.Core\     (só a pasta CodeWalker.Core, tirada do repo da dexyfex)
 ```
 
 ```bash
-git clone https://github.com/dexyfex/CodeWalker.git C:\Projetos\CodeWalker
+git clone --depth=1 https://github.com/dexyfex/CodeWalker.git C:\Projetos\CodeWalkerRepo
 ```
+
+Depois mova `C:\Projetos\CodeWalkerRepo\CodeWalker.Core` para `C:\Projetos\CodeWalker.Core`.
+É exatamente o que o workflow de release faz no CI — **não altere esse caminho no `.csproj`**
+para acomodar um layout local diferente, senão o build do CI quebra no passo `Publish`.
 
 ```bash
 dotnet publish CodeWalker.API.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o publish
