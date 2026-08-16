@@ -126,7 +126,7 @@ namespace CodeWalker.API.Controllers
 
                         if (!xml)
                         {
-                            System.IO.File.WriteAllBytes(objectFilePath, fileBytes);
+                            System.IO.File.WriteAllBytes(objectFilePath, ToDiskFormat(fileBytes, entry));
                             results.Add(new { fullRpfPath, message = "File saved successfully.", objectFilePath });
                         }
                     }
@@ -141,12 +141,38 @@ namespace CodeWalker.API.Controllers
             }
             catch (InvalidOperationException ex)
             {
-                return StatusCode(503, new { 
-                    error = "Service unavailable", 
+                return StatusCode(503, new {
+                    error = "Service unavailable",
                     message = ex.Message,
                     solution = "Use /api/set-config to configure a valid GTA path"
                 });
             }
+        }
+
+        /// <summary>
+        /// Puts an extracted entry into the shape a file on disk is expected to have.
+        ///
+        /// Resource entries (.yft, .ytd, .ydr and friends) live inside the RPF as raw inner
+        /// data: no header, already decompressed. Writing those bytes straight to disk produces
+        /// a file the game cannot load — it rejects the model with ERR_SYS_INVALIDRESOURCE
+        /// because the file starts with "FRAG" instead of "RSC7". Adding the header without
+        /// compressing is just as broken: the header announces deflate data that isn't there
+        /// and the game dies on a zlib failure. Both halves are required.
+        ///
+        /// Binary entries (.meta, .ymt in PSO/RBF, .rpf) are already in their disk shape and
+        /// are returned untouched.
+        /// </summary>
+        private static byte[] ToDiskFormat(byte[] fileBytes, RpfFileEntry entry)
+        {
+            // Preserva o erro que o WriteAllBytes daria: gravar um arquivo vazio seria pior
+            ArgumentNullException.ThrowIfNull(fileBytes);
+
+            if (entry is not RpfResourceFileEntry resourceEntry || fileBytes.Length == 0)
+            {
+                return fileBytes;
+            }
+
+            return ResourceBuilder.AddResourceHeader(resourceEntry, ResourceBuilder.Compress(fileBytes));
         }
     }
 }
